@@ -1,3 +1,7 @@
-# mining_massive_data_assignments
+# Mining Massive Data (MMD)
+SS 2022
+## Programming assignments
 
-read me
+Lukas Hinterleitner, Lukas Till Schawerda, Kilian Wohlleben
+
+
