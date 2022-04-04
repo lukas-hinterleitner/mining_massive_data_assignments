@@ -1,5 +1,14 @@
-import numpy
+import numpy as np
 import pandas as pd
+
+from math import sqrt
+
+
+# creates a random matrix with shape n x d
+def create_random_matrix(n, d):
+    # random matrix construction using the method introduced by Achlioptas
+    return np.random.default_rng().choice([+1, 0, -1], size=(n, d), p=[1 / 6, 2 / 3, 1 / 6]) * sqrt(3)
+
 
 # import and filter data
 tracks = pd.read_csv("fma_metadata/tracks.csv", index_col=0, header=[0, 1])
@@ -26,6 +35,3 @@ features_test_data = features.filter(items=tracks_test_data.index, axis=0)
 print(f"features training data shape: {features_training_data.shape}")
 print(f"features validation data shape: {features_validation_data.shape}")
 print(f"features test data shape: {features_test_data.shape}", "\n")
-
-
-#%%
