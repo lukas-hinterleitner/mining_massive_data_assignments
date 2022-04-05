@@ -75,3 +75,37 @@ features_test_data = features.filter(items=tracks_test_data.index, axis=0)
 print(f"features training data shape: {features_training_data.shape}")
 print(f"features validation data shape: {features_validation_data.shape}")
 print(f"features test data shape: {features_test_data.shape}", "\n")
+
+lsh = LSH(10, 100, features.shape[1])
+
+for index, track in zip(features_training_data.index, features_training_data.values):
+    lsh[track] = index
+
+# needs to be put into a for loop for each validation track --- start
+
+track_index = 4
+
+validation_track_id, validation_track = features_validation_data.index[track_index], features_validation_data.iloc[
+    track_index]
+
+# neighbours of track with given track_index
+neighbour_ids = lsh[validation_track]
+neighbours = features_training_data.filter(neighbour_ids, axis=0)
+
+# distance function can be euclidian distance or cosine distance
+distance_function = np.linalg.norm
+
+# calculate distances between neighbours and validation track with specific track_index
+distances = []
+for i in range(len(neighbours)):
+    distances.append((neighbour_ids[i], (distance_function(neighbours.iloc[i] - validation_track))))
+
+distances.sort(key=lambda x: x[1])
+nearest_neighbour_ids = np.array(distances)[:, 0]
+
+print(f"the ten nearest neighbours of track {validation_track_id} are: {nearest_neighbour_ids[:11]}")
+
+# needs to be put into a for loop for each validation track --- end
+
+
+# %%
