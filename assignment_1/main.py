@@ -134,8 +134,7 @@ class ApproximateNearestNeighbour:
             distances.sort(key=lambda x: x[1])
 
             # use k nearest neighbours for classification
-            # if only less than k nearest neighbours can be found, use only these neighbours
-            # TODO: decide if we want this behaviour or just ignore tracks with less than k neighbours
+            # if less than k nearest neighbours can be found, use only these neighbours
             distances = distances[:min(self.__k_nearest_neighbours, len(distances))]
 
             # extract ids of k nearest neighbours to get the corresponding genres from the tracks dataset later
