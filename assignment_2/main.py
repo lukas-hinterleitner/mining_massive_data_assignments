@@ -12,16 +12,30 @@ def import_data(path: str):
     file_extension = path.split(".")[-1]
 
     if exists(path):
+        print(path)
         if file_extension == "csv":
             csv = pd.read_csv(path).to_numpy()
             y_idx = csv.shape[1] - 1
 
-            return csv[:, :y_idx], csv[:, y_idx]
+            X, y = csv[:, :y_idx], csv[:, y_idx]
+
+            print(f"X shape: {X.shape}")
+            print(f"y shape: {y.shape}")
+            print("-------------------")
+
+            return X, y
 
         elif file_extension == "npz":
             data = np.load(path)
 
-            return data["train"], data["train_labels"], data["test"], data["test_labels"]
+            X_train, y_train, X_test, y_test = data["train"].T, data["train_labels"].T, data["test"].T, data["test_labels"].T
+
+            print(f"X train shape: {X_train.shape}")
+            print(f"y train shape: {y_train.shape}")
+            print(f"X test shape: {X_test.shape}")
+            print(f"X test shape: {y_test.shape}")
+
+            return X_train, y_train, X_test, y_test
         else:
             raise FileNotFoundError("only the extensions (.csv, .npz) are supported")
     else:
@@ -45,18 +59,16 @@ class SVM:
         def regularizer(w):
             return self.lambda_ * np.linalg.norm(w)
 
+        # TODO: implement multi class hinge loss
         def objective(w):
             return regularizer(w) + sum([hinge_loss(x, y_, w) for x, y_ in zip(X, y)])
-
-        pass
 
     def predict(self, X):
         pass
 
 
-data_paths = ["data/toydata_tiny.csv", "data/toydata_large.csv", "data/mnist.npz"]
+toydata_small_X, toydata_small_y = import_data("data/toydata_tiny.csv")
+toydata_large_X, toydata_large_y = import_data("data/toydata_large.csv")
+mnist_X_train, mnist_y_train, mnist_X_test, mnist_y_test = import_data("data/mnist.npz")
 
-X, y = import_data(data_paths[0])
 
-print(f"X shape: {X.shape}")
-print(f"y shape: {y.shape}")
