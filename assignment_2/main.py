@@ -1,3 +1,5 @@
+import threading
+
 import time
 
 import numpy as np
@@ -52,7 +54,7 @@ def import_data(path: str):
 
 
 class CustomSVM:
-    def __init__(self, path_of_datafile, epochs=200, learning_rate=0.001, C=1.0, cross_validation_is_used=False):
+    def __init__(self, path_of_datafile, epochs, learning_rate, C, cross_validation_is_used=False):
         self.w_star = None
         self.epochs = epochs
 
@@ -64,9 +66,7 @@ class CustomSVM:
 
         # used to save the plot for sgd
         self.path_of_datafile = path_of_datafile
-        self.path_to_figure_file = path_of_datafile.replace("data", "plots").replace(".csv", ".pdf")
-
-        print(f"used parameters: C={C}, lr={learning_rate}, epochs={epochs}")
+        self.path_to_figure_file = path_of_datafile.replace("data", "plots").replace(".csv", ".png")
 
     # get_params needed for sklearn's cross validation
     def get_params(self, deep=True):
@@ -144,6 +144,7 @@ def run_5_fold_cv_SVM(path, epochs=200, learning_rate=0.001, C=1.0):
 
     start_time = time.time()
     svm = CustomSVM(path, epochs=epochs, learning_rate=learning_rate, C=C, cross_validation_is_used=True)
+    print(f"used parameters: C={C}, lr={learning_rate}, epochs={epochs}")
     scores = cross_val_score(svm, X, y, scoring="accuracy", cv=5)
     end_time = time.time()
     print(f"accuracy: {sum(scores) / len(scores)}")
