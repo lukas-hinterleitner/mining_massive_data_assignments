@@ -98,7 +98,7 @@ class CustomSVM:
         progress_description = "CV Training Progress" if self.cross_validation_is_used else "Training Progress"
 
         losses_for_each_epoch = []
-        save_sgd_figure = not exists(self.path_to_figure_file)
+        save_sgd_figure = not exists(self.path_to_figure_file) # only save figure if it doesn't already exist
 
         # stochastic gradient descent
         for t in tqdm(range(self.epochs), desc=progress_description):
