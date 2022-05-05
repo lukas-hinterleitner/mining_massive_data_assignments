@@ -162,6 +162,53 @@ def run_5_fold_cv_SVM(path, epochs=200, learning_rate=0.0001, C=1.0):
     print(f"runtime using CV: {end_time - start_time} seconds")
 
 
+
+# --- RANDOM FOURIER FEATURES ---
+
+
+def rff_transform(X, sigma, num_rffs):
+    
+    # Initialize transformed data 
+    zx = np.zeros([X.shape[0], num_rffs])
+    
+    for i in range(X.shape[0]):
+        
+        # Matrix of random vectors w_i
+        W = 1/sigma * np.random.standard_cauchy(num_rffs * X.shape[1])
+        W = W.reshape(num_rffs, X.shape[1])
+        
+        # Vector of random values b_i
+        b = 2*np.pi*np.random.rand(num_rffs)
+        
+        # Transformation
+        zx[i, :] = np.sqrt(2/num_rffs) * np.cos(W @ X[i, :] + b)
+        
+    return zx
+
+
+def run_5_fold_cv_SVM_with_rff(path, epochs=200, learning_rate=0.001, C=1.0, sigma=1, num_rffs=100):
+    assert path.split(".")[-1] == "csv", "cross validation should only be used for the toydata"
+
+    X_raw, y = import_data(path)
+    
+    X = rff_transform(X_raw, sigma, num_rffs)
+
+    start_time = time.time()
+    svm = CustomSVM(path, epochs=epochs, learning_rate=learning_rate, C=C, cross_validation_is_used=True)
+    print(f"used parameters: C={C}, lr={learning_rate}, epochs={epochs}")
+    scores = cross_val_score(svm, X, y, scoring="accuracy", cv=5)
+    end_time = time.time()
+    print(f"accuracy: {sum(scores) / len(scores)}")
+    print(f"runtime using CV: {end_time - start_time} seconds")
+
+run_5_fold_cv_SVM_with_rff("./data/toydata_tiny.csv", num_rffs=1000)
+
+# TODO: actually make this work :)
+
+
+
+# --- PARALLELISM ---
+
 class MyThread(threading.Thread):
     def __init__(self, threadID, name, counter, lock, X_partition, y_partition, learning_rate, C, T, append_func):
         threading.Thread.__init__(self)
