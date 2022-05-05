@@ -1,3 +1,5 @@
+import os
+
 import threading
 
 import time
@@ -7,6 +9,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from os.path import exists
+from os.path import isdir
 from tqdm import tqdm
 
 from sklearn.model_selection import cross_val_score
@@ -98,7 +101,7 @@ class CustomSVM:
         progress_description = "CV Training Progress" if self.cross_validation_is_used else "Training Progress"
 
         losses_for_each_epoch = []
-        save_sgd_figure = not exists(self.path_to_figure_file) # only save figure if it doesn't already exist
+        save_sgd_figure = not exists(self.path_to_figure_file)  # only save figure if it doesn't already exist
 
         # stochastic gradient descent
         for t in tqdm(range(self.epochs), desc=progress_description):
@@ -150,6 +153,9 @@ def run_5_fold_cv_SVM(path, epochs=200, learning_rate=0.001, C=1.0):
     print(f"accuracy: {sum(scores) / len(scores)}")
     print(f"runtime using CV: {end_time - start_time} seconds")
 
+
+if not isdir("./plots"):
+    os.mkdir("./plots")
 
 # we used a heuristic search for parameters instead of GridSearch
 # GridSearch would be very resource consuming regarding the runtime
