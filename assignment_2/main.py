@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 from os.path import exists
 from os.path import isdir
 from tqdm import tqdm
+from multiprocessing import cpu_count
 
 from sklearn.model_selection import cross_val_score
 from sklearn.utils import shuffle
@@ -106,40 +107,42 @@ class CustomSVM:
 
         progress_description = "CV Training Progress" if self.cross_validation_is_used else "Training Progress"
 
-        losses_for_each_epoch = []
-        save_sgd_figure = not exists(self.path_to_figure_file)  # only save figure if it doesn't already exist
+        if self.parallelize_sgd:
+            self.w_star = simu_parallel_sgd(X, y, self.learning_rate, self.C, self.epochs, k_machines=cpu_count())
 
-        # stochastic gradient descent
-        for t in tqdm(range(self.epochs), desc=progress_description):
-            for _ in range(X.shape[0]):
-                random_idx = np.random.randint(0, X.shape[0])
+        else:
+            losses_for_each_epoch = []
+            save_sgd_figure = not exists(self.path_to_figure_file)  # only save figure if it doesn't already exist
 
-                # use random sample since we are using stochastic gradient descent
-                x_random = X[random_idx]
-                y_random = y[random_idx]
+            # stochastic gradient descent
+            for t in tqdm(range(self.epochs), desc=progress_description):
+                for _ in range(X.shape[0]):
+                    random_idx = np.random.randint(0, X.shape[0])
 
-                loss = hinge_loss(x_random, y_random, w)
-                gradient = regularized_hinge_loss_gradient(loss, x_random, y_random, w, self.C)
+                    # use random sample since we are using stochastic gradient descent
+                    x_random = X[random_idx]
+                    y_random = y[random_idx]
 
-                # perform weight update
-                lr = self.learning_rate / (t + 1)
-                w = w - lr * gradient
+                    loss = hinge_loss(x_random, y_random, w)
+                    gradient = regularized_hinge_loss_gradient(loss, x_random, y_random, w, self.C)
 
-            # calculate the loss again for each epoch to plot it later
+                    # perform weight update
+                    lr = self.learning_rate / (t + 1)
+                    w = w - lr * gradient
+
+                # calculate the loss again for each epoch to plot it later
+                if save_sgd_figure:
+                    losses_for_each_epoch.append(np.sum(np.maximum(0, 1 - y * np.dot(X, w))))
+
+            self.w_star = w
+
             if save_sgd_figure:
-                losses_for_each_epoch.append(np.sum(np.maximum(0, 1 - y * np.dot(X, w))))
-
-        # w_p = simu_parallel_sgd(X, y, self.learning_rate, self.C, k_machines=10)
-
-        self.w_star = w
-
-        if save_sgd_figure:
-            plt.title(self.path_of_datafile)
-            plt.ylabel("training error")
-            plt.xlabel("epochs")
-            plt.plot(losses_for_each_epoch)
-            plt.savefig(self.path_to_figure_file)
-            plt.clf()
+                plt.title(self.path_of_datafile)
+                plt.ylabel("training error")
+                plt.xlabel("epochs")
+                plt.plot(losses_for_each_epoch)
+                plt.savefig(self.path_to_figure_file)
+                plt.clf()
 
         return self
 
@@ -148,7 +151,7 @@ class CustomSVM:
 
 
 # as stated in the task description, only needed for the toydata
-def run_5_fold_cv_SVM(path, epochs=200, learning_rate=0.0001, C=1.0):
+def run_5_fold_cv_SVM(path, epochs=200, learning_rate=0.001, C=1.0):
     assert path.split(".")[-1] == "csv", "cross validation should only be used for the toydata"
 
     X, y = import_data(path)
@@ -162,27 +165,24 @@ def run_5_fold_cv_SVM(path, epochs=200, learning_rate=0.0001, C=1.0):
     print(f"runtime using CV: {end_time - start_time} seconds")
 
 
-
 # --- RANDOM FOURIER FEATURES ---
 
 
 def rff_transform(X, sigma, num_rffs):
-    
-    # Initialize transformed data 
+    # Initialize transformed data
     zx = np.zeros([X.shape[0], num_rffs])
-    
+
     for i in range(X.shape[0]):
-        
-        # Matrix of random vectors w_i
-        W = 1/sigma * np.random.standard_cauchy(num_rffs * X.shape[1])
+        # Matrix of random vectors w_i10
+        W = 1 / sigma * np.random.standard_cauchy(num_rffs * X.shape[1])
         W = W.reshape(num_rffs, X.shape[1])
-        
+
         # Vector of random values b_i
-        b = 2*np.pi*np.random.rand(num_rffs)
-        
+        b = 2 * np.pi * np.random.rand(num_rffs)
+
         # Transformation
-        zx[i, :] = np.sqrt(2/num_rffs) * np.cos(W @ X[i, :] + b)
-        
+        zx[i, :] = np.sqrt(2 / num_rffs) * np.cos(W @ X[i, :] + b)
+
     return zx
 
 
@@ -190,7 +190,7 @@ def run_5_fold_cv_SVM_with_rff(path, epochs=200, learning_rate=0.001, C=1.0, sig
     assert path.split(".")[-1] == "csv", "cross validation should only be used for the toydata"
 
     X_raw, y = import_data(path)
-    
+
     X = rff_transform(X_raw, sigma, num_rffs)
 
     start_time = time.time()
@@ -201,25 +201,26 @@ def run_5_fold_cv_SVM_with_rff(path, epochs=200, learning_rate=0.001, C=1.0, sig
     print(f"accuracy: {sum(scores) / len(scores)}")
     print(f"runtime using CV: {end_time - start_time} seconds")
 
-run_5_fold_cv_SVM_with_rff("./data/toydata_tiny.csv", num_rffs=1000)
+
+# run_5_fold_cv_SVM_with_rff("./data/toydata_tiny.csv", num_rffs=1000)
+
 
 # TODO: actually make this work :)
 
 
-
 # --- PARALLELISM ---
 
-class MyThread(threading.Thread):
-    def __init__(self, threadID, name, counter, lock, X_partition, y_partition, learning_rate, C, T, append_func):
+class SimuParallelSGDThread(threading.Thread):
+    def __init__(self, counter, lock, X_partition, y_partition, epochs, learning_rate, C, T, append_func):
         threading.Thread.__init__(self)
-        self.threadID = threadID
-        self.name = name
         self.counter = counter
 
         self.lock = lock
 
         self.X_partition = X_partition
         self.y_partition = y_partition
+
+        self.epochs = epochs
 
         self.learning_rate = learning_rate
         self.C = C
@@ -234,7 +235,7 @@ class MyThread(threading.Thread):
         # initialize w0
         w = np.zeros(X.shape[1])
 
-        for _ in range(200):
+        for _ in range(self.epochs):
             for t in range(self.T):
                 x_t = X[t]
                 y_t = y[t]
@@ -251,7 +252,7 @@ class MyThread(threading.Thread):
         self.lock.release()
 
 
-def simu_parallel_sgd(X_, y_, learning_rate, C, k_machines):
+def simu_parallel_sgd(X_, y_, learning_rate, C, epochs, k_machines):
     T = X_.shape[0] // k_machines
 
     X_partitions = np.array_split(X_, k_machines)
@@ -264,11 +265,17 @@ def simu_parallel_sgd(X_, y_, learning_rate, C, k_machines):
 
     lock = threading.Lock()
 
+    threads = []
+
     # TODO: use threadpool instead of MyThread class
     #  https://stackoverflow.com/questions/6893968/how-to-get-the-return-value-from-a-thread-in-python#14299004
-    for i in range(k_machines):
-        thread = MyThread(i, f"thread {i}", i, lock, X_partitions[i], y_partitions[i], learning_rate, C, T, append_func)
+    for i in tqdm(range(k_machines)):
+        thread = SimuParallelSGDThread(i, lock, X_partitions[i], y_partitions[i], epochs, learning_rate, C, T, append_func)
         thread.start()
+
+        threads.append(thread)
+
+    for thread in threads:
         thread.join()
 
     return np.sum(w_array, axis=0) / k_machines
@@ -279,7 +286,7 @@ if not isdir("./plots"):
 
 # we used a heuristic search for parameters instead of GridSearch
 # GridSearch would be very resource consuming regarding the runtime
-run_5_fold_cv_SVM("./data/toydata_tiny.csv", learning_rate=0.1, C=1.5)
+run_5_fold_cv_SVM("./data/toydata_tiny.csv", learning_rate=0.1, C=1.5, )
 # run_5_fold_cv_SVM("./data/toydata_large.csv", learning_rate=0.001, epochs=200, C=1.5)
 
 mnist_X_train, mnist_y_train, mnist_X_test, mnist_y_test = import_data("./data/mnist.npz")
