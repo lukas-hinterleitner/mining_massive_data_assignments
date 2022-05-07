@@ -58,9 +58,30 @@ def import_data(path: str):
         raise FileNotFoundError("file not found")
 
 
-# TODO: implement multi class hinge loss
-def hinge_loss(x, y, w):  # return the loss and the corresponding gradient
-    return max(0, 1 - y * np.dot(w, x))
+def hinge_loss(x, y, w, gradient = False):  # return the loss and the corresponding gradient
+    loss = max(0, 1 - y * np.dot(w, x))
+    
+    if gradient is False:
+        return loss
+    else:
+        if loss == 0:
+            return loss, 0
+        else:
+            return loss, -y * x
+    
+def multi_class_hinge_loss(x, y, w, gradient = False):  # return the loss and the corresponding gradient
+    loss = max(0, 1 + max(np.dot(w[np.arange(len(w))!=y], x)) - np.dot(w[y], x))
+    # use is to avoid abiguity with 0
+    if gradient is False:
+        return loss
+    else:
+        if loss == 0:
+            return loss, 0
+        else:
+            if gradient == y:
+                return loss, -x
+            else:
+                return loss, x
 
 
 def regularized_hinge_loss_gradient(loss, x, y, w, C):
