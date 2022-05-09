@@ -58,21 +58,22 @@ def import_data(path: str):
         raise FileNotFoundError("file not found")
 
 
-def hinge_loss(x, y, w, gradient = False):  # return the loss and the corresponding gradient
+def hinge_loss(x, y, w, gradient=False):  # return the loss and the corresponding gradient
     loss = max(0, 1 - y * np.dot(w, x))
-    
-    if gradient is False:
+
+    if not gradient:
         return loss
     else:
         if loss == 0:
             return loss, 0
         else:
             return loss, -y * x
-    
-def multi_class_hinge_loss(x, y, w, gradient = False):  # return the loss and the corresponding gradient
-    loss = max(0, 1 + max(np.dot(w[np.arange(len(w))!=y], x)) - np.dot(w[y], x))
+
+
+def multi_class_hinge_loss(x, y, w, gradient=False):  # return the loss and the corresponding gradient
+    loss = max(0, 1 + max(np.dot(w[np.arange(len(w)) != y], x)) - np.dot(w[y], x))
     # use is to avoid abiguity with 0
-    if gradient is False:
+    if not gradient:
         return loss
     else:
         if loss == 0:
@@ -146,6 +147,9 @@ class CustomSVM:
 
                     loss = hinge_loss(x_random, y_random, w)
                     gradient = regularized_hinge_loss_gradient(loss, x_random, y_random, w, self.C)
+
+                    multi_class_loss = multi_class_hinge_loss(x_random, y_random, w)
+                    # print(loss, multi_class_loss)
 
                     # perform weight update
                     lr = self.learning_rate / (t + 1)
@@ -291,7 +295,8 @@ def simu_parallel_sgd(X_, y_, learning_rate, C, epochs, k_machines):
     # TODO: use threadpool instead of MyThread class
     #  https://stackoverflow.com/questions/6893968/how-to-get-the-return-value-from-a-thread-in-python#14299004
     for i in tqdm(range(k_machines)):
-        thread = SimuParallelSGDThread(i, lock, X_partitions[i], y_partitions[i], epochs, learning_rate, C, T, append_func)
+        thread = SimuParallelSGDThread(i, lock, X_partitions[i], y_partitions[i], epochs, learning_rate, C, T,
+                                       append_func)
         thread.start()
 
         threads.append(thread)
