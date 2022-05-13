@@ -14,6 +14,7 @@ from tqdm import tqdm
 from multiprocessing import cpu_count
 
 from sklearn.model_selection import cross_val_score
+from sklearn.metrics import accuracy_score
 from sklearn.utils import shuffle
 
 np.random.seed(42)
@@ -58,38 +59,31 @@ def import_data(path: str):
         raise FileNotFoundError("file not found")
 
 
-def hinge_loss(x, y, w, C = 0, gradient=False):  # return the loss and the corresponding gradient
-    loss = max(0, 1 - y * np.dot(w, x)) + C * np.dot(w, w)
+def hinge_loss(x, y, w, C=0, gradient=False):  # return the loss and the corresponding gradient
+    loss = max(0, 1 - y * np.dot(w, x))
 
     if not gradient:
         return loss
     else:
         if loss == 0:
-            return loss, 2*C*w
+            return loss, w
         else:
-            return loss, -y * x + 2*C*w
+            return loss, w - C * y * x
 
 
 def multi_class_hinge_loss(x, y, w, C, gradient=False):  # return the loss and the corresponding gradient
-    loss = max(0, 1 + max(np.dot(w[np.arange(len(w)) != y], x)) - np.dot(w[y], x)) + C*np.dot(w[y], w[y])
+    loss = max(0, 1 + max(np.dot(w[np.arange(len(w)) != y], x)) - np.dot(w[y], x)) + C * np.dot(w[y], w[y])
     # use is to avoid abiguity with 0
     if not gradient:
         return loss
     else:
         if loss == 0:
-            return loss, 2*C*w[y]
+            return loss, 2 * C * w[y]
         else:
             if gradient == y:
-                return loss, -x + 2*C*w[y]
+                return loss, -x + 2 * C * w[y]
             else:
-                return loss, x + 2*C*w[y]
-
-
-def regularized_hinge_loss_gradient(loss, x, y, w, C):
-    if loss == 0:
-        return w
-    else:
-        return w - C * y * x
+                return loss, x + 2 * C * w[y]
 
 
 class CustomSVM:
@@ -129,9 +123,11 @@ class CustomSVM:
 
         progress_description = "CV Training Progress" if self.cross_validation_is_used else "Training Progress"
 
+        # use hinge loss when we have a binary classification problem and the multi class hinge loss otherwise
+        loss_gradient_function = multi_class_hinge_loss if np.unique(y).shape[0] > 2 else hinge_loss
+
         if self.parallelize_sgd:
             self.w_star = simu_parallel_sgd(X, y, self.learning_rate, self.C, self.epochs, k_machines=cpu_count())
-
         else:
             losses_for_each_epoch = []
             save_sgd_figure = not exists(self.path_to_figure_file)  # only save figure if it doesn't already exist
@@ -145,11 +141,7 @@ class CustomSVM:
                     x_random = X[random_idx]
                     y_random = y[random_idx]
 
-                    loss = hinge_loss(x_random, y_random, w)
-                    gradient = regularized_hinge_loss_gradient(loss, x_random, y_random, w, self.C)
-
-                    #multi_class_loss = multi_class_hinge_loss(x_random, y_random, w)
-                    # print(loss, multi_class_loss)
+                    loss, gradient = loss_gradient_function(x_random, y_random, w, C=self.C, gradient=True)
 
                     # perform weight update
                     lr = self.learning_rate / (t + 1)
@@ -176,18 +168,55 @@ class CustomSVM:
 
 
 # as stated in the task description, only needed for the toydata
-def run_5_fold_cv_SVM(path, epochs=200, learning_rate=0.001, C=1.0):
-    assert path.split(".")[-1] == "csv", "cross validation should only be used for the toydata"
+def evaluate_SVC(path, epochs=200, learning_rate=0.001, C=1.0, parallelize_sgd=False, RFF=None):
+    # RFF should be a dict with format : {"sigma": 1, "num_rffs": 100}
+    data = import_data(path)
 
-    X, y = import_data(path)
+    # initialize variables
+    X, y, X_test, y_test = None, None, None, None
+
+    if len(data) == 2:
+        X, y = data[0], data[1]
+    elif len(data) == 4:
+        X, y, X_test, y_test = data[0], data[1], data[2], data[2]
+    else:
+        raise ValueError("got some strange data :/")
+
+    # apply RFF
+    if RFF is not None:
+        print("training model using RFF")
+        print(f"RFF parameters = {RFF}")
+        X = rff_transform(X, sigma=RFF["sigma"], num_rffs=RFF["num_rffs"])
+
+        if X_test is not None:
+            X_test = rff_transform(X, sigma=RFF["sigma"], num_rffs=RFF["num_rffs"])
 
     start_time = time.time()
-    svm = CustomSVM(path, epochs=epochs, learning_rate=learning_rate, C=C, cross_validation_is_used=True)
+
+    # do not use cross
+    svm = CustomSVM(path, epochs=epochs, learning_rate=learning_rate, C=C, cross_validation_is_used=not parallelize_sgd,
+                    parallelize_sgd=parallelize_sgd)
     print(f"used parameters: C={C}, lr={learning_rate}, epochs={epochs}")
-    scores = cross_val_score(svm, X, y, scoring="accuracy", cv=5)
+
+    accuracy = 0.0
+
+    if parallelize_sgd:
+        print("using a parallelized approach")
+
+    if len(data) == 2:
+        print("using cross validation")
+        scores = cross_val_score(svm, X, y, scoring="accuracy", cv=5)
+        accuracy = sum(scores) / len(scores)
+    else:
+        svm.fit(X, y)
+        y_pred = svm.predict(X_test)
+        accuracy = accuracy_score(y_test, y_pred)
+
+    print(f"accuracy: {accuracy}")
     end_time = time.time()
-    print(f"accuracy: {sum(scores) / len(scores)}")
-    print(f"runtime using CV: {end_time - start_time} seconds")
+    print(f"runtime: {end_time - start_time} seconds")
+
+    return accuracy
 
 
 # --- RANDOM FOURIER FEATURES ---
@@ -209,40 +238,6 @@ def rff_transform(X, sigma, num_rffs):
         zx[i, :] = np.sqrt(2 / num_rffs) * np.cos(W @ X[i, :] + b)
 
     return zx
-
-
-def run_5_fold_cv_SVM_with_rff(path, epochs=200, learning_rate=0.001, C=1.0, sigma=1, num_rffs=100):
-    assert path.split(".")[-1] == "csv", "cross validation should only be used for the toydata"
-
-    X_raw, y = import_data(path)
-
-    X = rff_transform(X_raw, sigma, num_rffs)
-
-    start_time = time.time()
-    svm = CustomSVM(path, epochs=epochs, learning_rate=learning_rate, C=C, cross_validation_is_used=True)
-    print(f"used parameters: C={C}, lr={learning_rate}, epochs={epochs}")
-    scores = cross_val_score(svm, X, y, scoring="accuracy", cv=5)
-    end_time = time.time()
-    
-    accuracy = sum(scores)/len(scores)
-    print(f"accuracy: {accuracy}")
-    print(f"runtime using CV: {end_time - start_time} seconds")
-    return accuracy
-
-
-test_rffs = [100, 200, 500, 1000]
-
-accuracies = {}
-
-for rff in test_rffs:
-    acc = run_5_fold_cv_SVM_with_rff("./data/toydata_tiny.csv", num_rffs=rff)
-    
-    accuracies[rff] = acc
-    
-
-print(accuracies)
-
-# TODO: RFF for other data sets
 
 
 # --- PARALLELISM ---
@@ -277,8 +272,7 @@ class SimuParallelSGDThread(threading.Thread):
                 x_t = X[t]
                 y_t = y[t]
 
-                loss = hinge_loss(x_t, y_t, w)
-                gradient = regularized_hinge_loss_gradient(loss, x_t, y_t, w, self.C)
+                loss, gradient = hinge_loss(x_t, y_t, w, self.C, gradient=True)
 
                 lr = self.learning_rate / (t + 1)
 
@@ -304,8 +298,6 @@ def simu_parallel_sgd(X_, y_, learning_rate, C, epochs, k_machines):
 
     threads = []
 
-    # TODO: use threadpool instead of MyThread class
-    #  https://stackoverflow.com/questions/6893968/how-to-get-the-return-value-from-a-thread-in-python#14299004
     for i in tqdm(range(k_machines)):
         thread = SimuParallelSGDThread(i, lock, X_partitions[i], y_partitions[i], epochs, learning_rate, C, T,
                                        append_func)
@@ -322,9 +314,36 @@ def simu_parallel_sgd(X_, y_, learning_rate, C, epochs, k_machines):
 if not isdir("./plots"):
     os.mkdir("./plots")
 
-# we used a heuristic search for parameters instead of GridSearch
-# GridSearch would be very resource consuming regarding the runtime
-run_5_fold_cv_SVM("./data/toydata_tiny.csv", learning_rate=0.1, C=1.5, )
-# run_5_fold_cv_SVM("./data/toydata_large.csv", learning_rate=0.001, epochs=200, C=1.5)
+data_paths = ("./data/toydata_tiny.csv",) # "./data/toydata_large.csv", "./data/toydata_tiny.csv")
 
-mnist_X_train, mnist_y_train, mnist_X_test, mnist_y_test = import_data("./data/mnist.npz")
+# task 1
+
+# we used a heuristic search for parameters instead of GridSearch
+# GridSearch would be very resource consuming regarding the runtime, therefore we decided to stick with a manual search
+
+print("Task 1 (Linear SVM Model)\n")
+
+evaluate_SVC(data_paths[0], learning_rate=0.1, C=1.5, )
+# evaluate_SVC(data_paths[1], learning_rate=0.1, C=1.5, )
+# evaluate_SVC(data_paths[2], learning_rate=0.1, C=1.5, )
+
+# task 2
+
+print("\n\nTask2 (Random Fourier Features)\n")
+
+for data_path in data_paths:
+    test_rffs = [100, 200, 500, 1000]
+
+    for rff in test_rffs:
+        evaluate_SVC(data_path, RFF={"sigma": 1, "num_rffs": rff})
+
+    print(f"accuracies using")
+
+# task 3
+
+print("\n\nTask3 (Parallel Implementation)\n")
+
+# use parallelization
+evaluate_SVC(data_paths[0], learning_rate=0.1, C=1.5, parallelize_sgd=True)
+# evaluate_SVC(data_paths[1], learning_rate=0.1, C=1.5, parallelize_sgd=True)
+# evaluate_SVC(data_paths[2], learning_rate=0.1, C=1.5, parallelize_sgd=True)
