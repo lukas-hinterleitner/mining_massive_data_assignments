@@ -148,7 +148,7 @@ class CustomSVM:
                     loss = hinge_loss(x_random, y_random, w)
                     gradient = regularized_hinge_loss_gradient(loss, x_random, y_random, w, self.C)
 
-                    multi_class_loss = multi_class_hinge_loss(x_random, y_random, w)
+                    #multi_class_loss = multi_class_hinge_loss(x_random, y_random, w)
                     # print(loss, multi_class_loss)
 
                     # perform weight update
@@ -223,14 +223,26 @@ def run_5_fold_cv_SVM_with_rff(path, epochs=200, learning_rate=0.001, C=1.0, sig
     print(f"used parameters: C={C}, lr={learning_rate}, epochs={epochs}")
     scores = cross_val_score(svm, X, y, scoring="accuracy", cv=5)
     end_time = time.time()
-    print(f"accuracy: {sum(scores) / len(scores)}")
+    
+    accuracy = sum(scores)/len(scores)
+    print(f"accuracy: {accuracy}")
     print(f"runtime using CV: {end_time - start_time} seconds")
+    return accuracy
 
 
-# run_5_fold_cv_SVM_with_rff("./data/toydata_tiny.csv", num_rffs=1000)
+test_rffs = [100, 200, 500, 1000]
 
+accuracies = {}
 
-# TODO: actually make this work :)
+for rff in test_rffs:
+    acc = run_5_fold_cv_SVM_with_rff("./data/toydata_tiny.csv", num_rffs=rff)
+    
+    accuracies[rff] = acc
+    
+
+print(accuracies)
+
+# TODO: RFF for other data sets
 
 
 # --- PARALLELISM ---
