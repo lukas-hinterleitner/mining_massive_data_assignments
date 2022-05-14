@@ -50,7 +50,7 @@ def import_data(path: str):
             print(f"X train shape: {X_train.shape}")
             print(f"y train shape: {y_train.shape}")
             print(f"X test shape: {X_test.shape}")
-            print(f"X test shape: {y_test.shape}")
+            print(f"y test shape: {y_test.shape}")
 
             return X_train, y_train, X_test, y_test
         else:
@@ -71,19 +71,19 @@ def hinge_loss(x, y, w, C=0, gradient=False):  # return the loss and the corresp
             return loss, w - C * y * x
 
 
-def multi_class_hinge_loss(x, y, w, C, gradient=False):  # return the loss and the corresponding gradient
-    loss = max(0, 1 + max(np.dot(w[np.arange(len(w)) != y], x)) - np.dot(w[y], x)) + C * np.dot(w[y], w[y])
+def multi_class_hinge_loss(x, y, w, C = 0, gradient=False):  # return the loss and the corresponding gradient
+    loss = max(0, 1 + max(np.dot(w[:,np.arange(w.shape[1]) != y].T, x)) - np.dot(w[:,y].T, x)) + C * np.dot(w[:,y].T, w[:,y])
     # use is to avoid abiguity with 0
     if not gradient:
         return loss
     else:
         if loss == 0:
-            return loss, 2 * C * w[y]
+            return loss, 2 * C * w[:,y]
         else:
-            if gradient == y:
-                return loss, -x + 2 * C * w[y]
-            else:
-                return loss, x + 2 * C * w[y]
+            grad = np.zeros(w.shape)
+            for i in range(w.shape[1]): grad[:,np.array([i])] = (x + 2 * C * w[:,y].T).T
+            grad[:, y] = (-x + 2 * C * w[:,y].T).T
+            return(loss, grad)
 
 
 class CustomSVM:
@@ -100,7 +100,7 @@ class CustomSVM:
 
         # used to save the plot for sgd
         self.path_of_datafile = path_of_datafile
-        self.path_to_figure_file = path_of_datafile.replace("data", "plots").replace(".csv", ".png")
+        self.path_to_figure_file = path_of_datafile.replace("data", "plots").replace(".csv", ".png").replace(".npz", ".png")
 
         self.parallelize_sgd = parallelize_sgd
 
@@ -119,7 +119,10 @@ class CustomSVM:
     # good article: https://towardsdatascience.com/solving-svm-stochastic-gradient-descent-and-hinge-loss-8e8b4dd91f5b
     def fit(self, X, y):
         # initialize w0 with zeros
-        w = np.zeros(X.shape[1])
+        if len(np.unique(y)) == 2:
+            w = np.zeros(X.shape[1])
+        else:
+            w = np.zeros((X.shape[1], len(np.unique(y))))
 
         progress_description = "CV Training Progress" if self.cross_validation_is_used else "Training Progress"
 
@@ -149,7 +152,7 @@ class CustomSVM:
 
                 # calculate the loss again for each epoch to plot it later
                 if save_sgd_figure:
-                    losses_for_each_epoch.append(np.sum(np.maximum(0, 1 - y * np.dot(X, w))))
+                    losses_for_each_epoch.append(np.sum(loss_gradient_function(X, y, w, C=self.C, gradient=False)))
 
             self.w_star = w
 
@@ -164,7 +167,11 @@ class CustomSVM:
         return self
 
     def predict(self, X):
-        return np.sign(np.dot(X, self.w_star))
+        if len(self.w_star.shape) == 1:
+            prediction = np.sign(np.dot(X, self.w_star))
+        else:
+            prediction = np.argmax(np.dot(X, self.w_star), axis=1)
+        return prediction
 
 
 # as stated in the task description, only needed for the toydata
@@ -177,8 +184,10 @@ def evaluate_SVC(path, epochs=200, learning_rate=0.001, C=1.0, parallelize_sgd=F
 
     if len(data) == 2:
         X, y = data[0], data[1]
+        y = y.astype(int)
     elif len(data) == 4:
-        X, y, X_test, y_test = data[0], data[1], data[2], data[2]
+        X, y, X_test, y_test = data[0], data[1], data[2], data[3]
+        y, y_test = y.astype(int), y_test.astype(int)
     else:
         raise ValueError("got some strange data :/")
 
@@ -314,7 +323,7 @@ def simu_parallel_sgd(X_, y_, learning_rate, C, epochs, k_machines):
 if not isdir("./plots"):
     os.mkdir("./plots")
 
-data_paths = ("./data/toydata_tiny.csv",) # "./data/toydata_large.csv", "./data/toydata_tiny.csv")
+data_paths = ("./data/toydata_tiny.csv", "./data/toydata_large.csv", "./data/mnist.npz")
 
 # task 1
 
@@ -323,7 +332,7 @@ data_paths = ("./data/toydata_tiny.csv",) # "./data/toydata_large.csv", "./data/
 
 print("Task 1 (Linear SVM Model)\n")
 
-evaluate_SVC(data_paths[0], learning_rate=0.1, C=1.5, )
+# evaluate_SVC(data_paths[0], learning_rate=0.1, C=1.5, )
 # evaluate_SVC(data_paths[1], learning_rate=0.1, C=1.5, )
 # evaluate_SVC(data_paths[2], learning_rate=0.1, C=1.5, )
 
