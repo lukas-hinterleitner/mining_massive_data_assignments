@@ -272,15 +272,13 @@ class SimuParallelSGDThread(threading.Thread):
         self.append_func = append_func
 
     def run(self):
-        X, y = shuffle(self.X_partition, self.y_partition, random_state=42)
-
         # initialize w0
-        w = np.zeros(X.shape[1])
+        w = np.zeros(self.X_partition.shape[1])
 
         for _ in range(self.epochs):
             for t in range(self.T):
-                x_t = X[t]
-                y_t = y[t]
+                x_t = self.X_partition[t]
+                y_t = self.y_partition[t]
 
                 loss, gradient = hinge_loss(x_t, y_t, w, self.C, gradient=True)
 
@@ -295,6 +293,8 @@ class SimuParallelSGDThread(threading.Thread):
 
 def simu_parallel_sgd(X_, y_, learning_rate, C, epochs, k_machines):
     T = X_.shape[0] // k_machines
+
+    X_, y_ = shuffle(X_, y_, random_state=42)
 
     X_partitions = np.array_split(X_, k_machines)
     y_partitions = np.array_split(y_, k_machines)
