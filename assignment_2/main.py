@@ -60,7 +60,7 @@ def import_data(path: str):
 
 
 def hinge_loss(x, y, w, C=0, gradient=False):  # return the loss and the corresponding gradient
-    loss = max(0, 1 - y * np.dot(w, x))
+    loss = np.clip(1 - y * np.dot(x, w), 0, None)
 
     if not gradient:
         return loss
@@ -72,8 +72,8 @@ def hinge_loss(x, y, w, C=0, gradient=False):  # return the loss and the corresp
 
 
 def multi_class_hinge_loss(x, y, w, C = 0, gradient=False):  # return the loss and the corresponding gradient
-    loss = max(0, 1 + max(np.dot(w[:,np.arange(w.shape[1]) != y].T, x)) - np.dot(w[:,y].T, x)) + C * np.dot(w[:,y].T, w[:,y])
-    # use is to avoid abiguity with 0
+    pred = np.dot(x, w)
+    loss = np.clip(1 - pred[y.T] + np.max(pred[np.arange(w.shape[1]) != y].reshape(len(y), w.shape[1] -1)) , 0, None)
     if not gradient:
         return loss
     else:
@@ -81,7 +81,7 @@ def multi_class_hinge_loss(x, y, w, C = 0, gradient=False):  # return the loss a
             return loss, 2 * C * w[:,y]
         else:
             grad = np.zeros(w.shape)
-            for i in range(w.shape[1]): grad[:,np.array([i])] = (x + 2 * C * w[:,y].T).T
+            for i in range(w.shape[1]): grad[:,i] = (x + 2 * C * w[:,i].T).T
             grad[:, y] = (-x + 2 * C * w[:,y].T).T
             return(loss, grad)
 
@@ -152,7 +152,7 @@ class CustomSVM:
 
                 # calculate the loss again for each epoch to plot it later
                 if save_sgd_figure:
-                    losses_for_each_epoch.append(np.sum(loss_gradient_function(X, y, w, C=self.C, gradient=False)))
+                    losses_for_each_epoch.append(np.mean(loss_gradient_function(X, y, w, C=self.C, gradient=False)))
 
             self.w_star = w
 
@@ -160,7 +160,7 @@ class CustomSVM:
                 plt.title(self.path_of_datafile)
                 plt.ylabel("training error")
                 plt.xlabel("epochs")
-                plt.plot(losses_for_each_epoch)
+                plt.plot(np.arange(1, self.epochs + 1)losses_for_each_epoch)
                 plt.savefig(self.path_to_figure_file)
                 plt.clf()
 
@@ -195,10 +195,11 @@ def evaluate_SVC(path, epochs=200, learning_rate=0.001, C=1.0, parallelize_sgd=F
     if RFF is not None:
         print("training model using RFF")
         print(f"RFF parameters = {RFF}")
-        X = rff_transform(X, sigma=RFF["sigma"], num_rffs=RFF["num_rffs"])
+        W, b = generate_rff_transformation(X, RFF["sigma"], RFF["num_rffs"])
+        X = rff_transform(X, W, b)
 
         if X_test is not None:
-            X_test = rff_transform(X, sigma=RFF["sigma"], num_rffs=RFF["num_rffs"])
+            X_test = rff_transform(X_test, W, b)
 
     start_time = time.time()
 
@@ -229,23 +230,17 @@ def evaluate_SVC(path, epochs=200, learning_rate=0.001, C=1.0, parallelize_sgd=F
 
 
 # --- RANDOM FOURIER FEATURES ---
+def generate_rff_transformation(X, sigma, num_rffs):
+    # Matrix of random vectors w_i10
+    W = 1 / sigma * np.random.standard_cauchy(num_rffs * X.shape[1])
+    W = W.reshape(X.shape[1], num_rffs)
+    
+    # Vector of random values b_i
+    b = 2 * np.pi * np.random.rand(num_rffs)
+    return(W, b)
 
-
-def rff_transform(X, sigma, num_rffs):
-    # Initialize transformed data
-    zx = np.zeros([X.shape[0], num_rffs])
-
-    for i in range(X.shape[0]):
-        # Matrix of random vectors w_i10
-        W = 1 / sigma * np.random.standard_cauchy(num_rffs * X.shape[1])
-        W = W.reshape(num_rffs, X.shape[1])
-
-        # Vector of random values b_i
-        b = 2 * np.pi * np.random.rand(num_rffs)
-
-        # Transformation
-        zx[i, :] = np.sqrt(2 / num_rffs) * np.cos(W @ X[i, :] + b)
-
+def rff_transform(X, W, b):
+    zx = np.sqrt(2 / b.shape[0]) * np.cos(np.dot(X, W) + b)
     return zx
 
 
@@ -332,9 +327,9 @@ data_paths = ("./data/toydata_tiny.csv", "./data/toydata_large.csv", "./data/mni
 
 print("Task 1 (Linear SVM Model)\n")
 
-# evaluate_SVC(data_paths[0], learning_rate=0.1, C=1.5, )
-# evaluate_SVC(data_paths[1], learning_rate=0.1, C=1.5, )
-# evaluate_SVC(data_paths[2], learning_rate=0.1, C=1.5, )
+evaluate_SVC(data_paths[0], learning_rate=0.1, C=1.5, )
+evaluate_SVC(data_paths[1], learning_rate=0.1, C=1.5, )
+evaluate_SVC(data_paths[2], learning_rate=0.1, C=1.5, )
 
 # task 2
 
@@ -344,9 +339,8 @@ for data_path in data_paths:
     test_rffs = [100, 200, 500, 1000]
 
     for rff in test_rffs:
-        evaluate_SVC(data_path, RFF={"sigma": 1, "num_rffs": rff})
-
-    print(f"accuracies using")
+        accuracy = evaluate_SVC(data_path, epochs = 3, RFF={"sigma": 1, "num_rffs": rff})
+        print(f"accuracy using {rff} random fourier features: {accuracy}")
 
 # task 3
 
@@ -354,5 +348,5 @@ print("\n\nTask3 (Parallel Implementation)\n")
 
 # use parallelization
 evaluate_SVC(data_paths[0], learning_rate=0.1, C=1.5, parallelize_sgd=True)
-# evaluate_SVC(data_paths[1], learning_rate=0.1, C=1.5, parallelize_sgd=True)
-# evaluate_SVC(data_paths[2], learning_rate=0.1, C=1.5, parallelize_sgd=True)
+evaluate_SVC(data_paths[1], learning_rate=0.1, C=1.5, parallelize_sgd=True)
+evaluate_SVC(data_paths[2], learning_rate=0.1, C=1.5, parallelize_sgd=True)
