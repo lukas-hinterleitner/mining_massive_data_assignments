@@ -75,18 +75,18 @@ def hinge_loss(x, y, w, C=0, gradient=False):  # return the loss and the corresp
             return loss, w - C * y * x
 
 
-def multi_class_hinge_loss(x, y, w, C = 0, gradient=False):  # return the loss and the corresponding gradient
+def multi_class_hinge_loss(x, y, w, C=0, gradient=False):  # return the loss and the corresponding gradient
     pred = np.dot(x, w)
-    loss = np.clip(1 - pred[y.T] + np.max(pred[np.arange(w.shape[1]) != y].reshape(len(y), w.shape[1] -1)) , 0, None)
+    loss = np.clip(1 - pred[y.T] + np.max(pred[np.arange(w.shape[1]) != y].reshape(len(y), w.shape[1] - 1)), 0, None)
     if not gradient:
         return loss
     else:
         if loss == 0:
-            return loss, 2 * C * w[:,y]
+            return loss, 2 * C * w[:, y]
         else:
             grad = np.zeros(w.shape)
-            for i in range(w.shape[1]): grad[:,i] = (x + 2 * C * w[:,i].T).T
-            grad[:, y] = (-x + 2 * C * w[:,y].T).T
+            for i in range(w.shape[1]): grad[:, i] = (x + 2 * C * w[:, i].T).T
+            grad[:, y] = (-x + 2 * C * w[:, y].T).T
             return loss, grad
 
 
@@ -104,7 +104,8 @@ class CustomSVM:
 
         # used to save the plot for sgd
         self.path_of_datafile = path_of_datafile
-        self.path_to_figure_file = path_of_datafile.replace("data", "plots").replace(".csv", ".png").replace(".npz", ".png")
+        self.path_to_figure_file = path_of_datafile.replace("data", "plots").replace(".csv", ".png").replace(".npz",
+                                                                                                             ".png")
 
         self.parallelize_sgd = parallelize_sgd
 
@@ -238,10 +239,11 @@ def generate_rff_transformation(X, sigma, num_rffs):
     # Matrix of random vectors w_i10
     W = 1 / sigma * np.random.standard_cauchy(num_rffs * X.shape[1])
     W = W.reshape(X.shape[1], num_rffs)
-    
+
     # Vector of random values b_i
     b = 2 * np.pi * np.random.rand(num_rffs)
-    return(W, b)
+    return (W, b)
+
 
 def rff_transform(X, W, b):
     zx = np.sqrt(2 / b.shape[0]) * np.cos(np.dot(X, W) + b)
@@ -343,7 +345,7 @@ for data_path in data_paths:
     test_rffs = [100, 200, 500, 1000]
 
     for rff in test_rffs:
-        accuracy = evaluate_SVC(data_path, epochs = 3, RFF={"sigma": 1, "num_rffs": rff})
+        accuracy = evaluate_SVC(data_path, epochs=200, RFF={"sigma": 1, "num_rffs": rff})
         print(f"accuracy using {rff} random fourier features: {accuracy}")
 
 # task 3
