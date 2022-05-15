@@ -17,6 +17,10 @@ from sklearn.model_selection import cross_val_score
 from sklearn.metrics import accuracy_score
 from sklearn.utils import shuffle
 
+from sklearnex import patch_sklearn
+
+patch_sklearn()
+
 np.random.seed(42)
 
 
@@ -83,7 +87,7 @@ def multi_class_hinge_loss(x, y, w, C = 0, gradient=False):  # return the loss a
             grad = np.zeros(w.shape)
             for i in range(w.shape[1]): grad[:,i] = (x + 2 * C * w[:,i].T).T
             grad[:, y] = (-x + 2 * C * w[:,y].T).T
-            return(loss, grad)
+            return loss, grad
 
 
 class CustomSVM:
@@ -160,7 +164,7 @@ class CustomSVM:
                 plt.title(self.path_of_datafile)
                 plt.ylabel("training error")
                 plt.xlabel("epochs")
-                plt.plot(np.arange(1, self.epochs + 1)losses_for_each_epoch)
+                plt.plot(np.arange(1, self.epochs + 1), losses_for_each_epoch)
                 plt.savefig(self.path_to_figure_file)
                 plt.clf()
 
