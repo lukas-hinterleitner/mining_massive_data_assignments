@@ -33,6 +33,8 @@ def get_processor_info():
     return ""
 
 
+# install sklearnex: https://intel.github.io/scikit-learn-intelex/installation.html
+
 # use hardware-acceleration for sklearn on Intel processors
 if "intel" in str(get_processor_info().lower()):
     from sklearnex import patch_sklearn
