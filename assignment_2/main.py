@@ -1,4 +1,5 @@
 import os
+import platform, subprocess
 
 import threading
 
@@ -15,11 +16,27 @@ from multiprocessing import cpu_count
 
 from sklearn.model_selection import cross_val_score
 from sklearn.metrics import accuracy_score
+from sklearn.svm import SVC
 from sklearn.utils import shuffle
 
-from sklearnex import patch_sklearn
 
-patch_sklearn()
+# https://stackoverflow.com/a/20161999
+def get_processor_info():
+    if platform.system() == "Windows":
+        return platform.processor()
+    elif platform.system() == "Darwin":
+        return subprocess.check_output(['/usr/sbin/sysctl', "-n", "machdep.cpu.brand_string"]).strip()
+    elif platform.system() == "Linux":
+        command = "cat /proc/cpuinfo"
+        return subprocess.check_output(command, shell=True).strip()
+    return ""
+
+
+# use hardware-acceleration for sklearn on Intel processors
+if "intel" in str(get_processor_info().lower()):
+    from sklearnex import patch_sklearn
+
+    patch_sklearn()
 
 np.random.seed(42)
 
@@ -40,9 +57,6 @@ def import_data(path: str):
 
             X, y = csv[:, :y_idx], csv[:, y_idx]
 
-            print(f"X shape: {X.shape}")
-            print(f"y shape: {y.shape}")
-
             return X, y
 
         elif file_extension == "npz":
@@ -50,11 +64,6 @@ def import_data(path: str):
 
             X_train, y_train, X_test, y_test = data["train"].T, data["train_labels"].T, data["test"].T, data[
                 "test_labels"].T
-
-            print(f"X train shape: {X_train.shape}")
-            print(f"y train shape: {y_train.shape}")
-            print(f"X test shape: {X_test.shape}")
-            print(f"y test shape: {y_test.shape}")
 
             return X_train, y_train, X_test, y_test
         else:
@@ -92,7 +101,7 @@ def multi_class_hinge_loss(x, y, w, C=0, gradient=False):  # return the loss and
 
 class CustomSVM:
     def __init__(self, path_of_datafile, epochs, learning_rate, C, cross_validation_is_used=False,
-                 parallelize_sgd=False):
+                 parallelize_sgd=False, RFF=None):
         self.w_star = None
         self.epochs = epochs
 
@@ -106,6 +115,10 @@ class CustomSVM:
         self.path_of_datafile = path_of_datafile
         self.path_to_figure_file = path_of_datafile.replace("data", "plots").replace(".csv", ".png").replace(".npz",
                                                                                                              ".png")
+        if RFF is not None:
+            self.path_to_figure_file = self.path_to_figure_file.replace(".png", f"_rff_{RFF['num_rffs']}.png")
+
+        self.RFF = RFF
 
         self.parallelize_sgd = parallelize_sgd
 
@@ -113,7 +126,7 @@ class CustomSVM:
     def get_params(self, deep=True):
         return {"epochs": self.epochs, "learning_rate": self.learning_rate, "C": self.C,
                 "cross_validation_is_used": self.cross_validation_is_used,
-                "path_of_datafile": self.path_of_datafile, "parallelize_sgd": self.parallelize_sgd}
+                "path_of_datafile": self.path_of_datafile, "parallelize_sgd": self.parallelize_sgd, "RFF": self.RFF}
 
     # set_params needed for sklearn's cross validation
     def set_params(self, **parameters):
@@ -180,19 +193,34 @@ class CustomSVM:
 
 
 # as stated in the task description, only needed for the toydata
-def evaluate_SVC(path, epochs=200, learning_rate=0.001, C=1.0, parallelize_sgd=False, RFF=None):
-    # RFF should be a dict with format : {"sigma": 1, "num_rffs": 100}
+def evaluate_SVC(path, epochs=200, learning_rate=0.001, C=1.0, parallelize_sgd=False, RFF=None, subset_size=0):
+    # RFF should be a dict with format : {"sigma": 1, "num_rffs": 100, subset_size=0}
     data = import_data(path)
 
     # initialize variables
     X, y, X_test, y_test = None, None, None, None
 
     if len(data) == 2:
-        X, y = data[0], data[1]
+        X, y = shuffle(data[0], data[1], random_state=42)
         y = y.astype(int)
+
+        print(f"X shape: {X.shape}")
+        print(f"y shape: {y.shape}")
     elif len(data) == 4:
         X, y, X_test, y_test = data[0], data[1], data[2], data[3]
+        X, y = shuffle(X, y, random_state=42)
+
+        if subset_size > 0:
+            X = X[:subset_size, :]
+            y = y[:subset_size]
+
+        print(f"X train shape: {X.shape}")
+        print(f"y train shape: {y.shape}")
+        print(f"X test shape: {X_test.shape}")
+        print(f"y test shape: {y_test.shape}")
+
         y, y_test = y.astype(int), y_test.astype(int)
+
     else:
         raise ValueError("got some strange data :/")
 
@@ -208,9 +236,8 @@ def evaluate_SVC(path, epochs=200, learning_rate=0.001, C=1.0, parallelize_sgd=F
 
     start_time = time.time()
 
-    # do not use cross
-    svm = CustomSVM(path, epochs=epochs, learning_rate=learning_rate, C=C, cross_validation_is_used=not parallelize_sgd,
-                    parallelize_sgd=parallelize_sgd)
+    svm = CustomSVM(path, epochs=epochs, learning_rate=learning_rate, C=C, cross_validation_is_used=not parallelize_sgd and len(data) == 2,
+                    parallelize_sgd=parallelize_sgd, RFF=RFF)
     print(f"used parameters: C={C}, lr={learning_rate}, epochs={epochs}")
 
     accuracy = 0.0
@@ -229,9 +256,10 @@ def evaluate_SVC(path, epochs=200, learning_rate=0.001, C=1.0, parallelize_sgd=F
 
     print(f"accuracy: {accuracy}")
     end_time = time.time()
-    print(f"runtime: {end_time - start_time} seconds")
+    runtime = end_time - start_time
+    print(f"runtime: {runtime} seconds")
 
-    return accuracy
+    return accuracy, runtime, data if subset_size == 0 else (X, y, X_test, y_test)
 
 
 # --- RANDOM FOURIER FEATURES ---
@@ -275,12 +303,15 @@ class SimuParallelSGDThread(threading.Thread):
         # initialize w0
         w = np.zeros(self.X_partition.shape[1])
 
+        # use hinge loss when we have a binary classification problem and the multi class hinge loss otherwise
+        loss_gradient_function = multi_class_hinge_loss if np.unique(self.y_partition).shape[0] > 2 else hinge_loss
+
         for _ in range(self.epochs):
             for t in range(self.T):
                 x_t = self.X_partition[t]
                 y_t = self.y_partition[t]
 
-                loss, gradient = hinge_loss(x_t, y_t, w, self.C, gradient=True)
+                loss, gradient = loss_gradient_function(x_t, y_t, w, self.C, gradient=True)
 
                 lr = self.learning_rate / (t + 1)
 
@@ -293,8 +324,6 @@ class SimuParallelSGDThread(threading.Thread):
 
 def simu_parallel_sgd(X_, y_, learning_rate, C, epochs, k_machines):
     T = X_.shape[0] // k_machines
-
-    X_, y_ = shuffle(X_, y_, random_state=42)
 
     X_partitions = np.array_split(X_, k_machines)
     y_partitions = np.array_split(y_, k_machines)
@@ -333,20 +362,63 @@ data_paths = ("./data/toydata_tiny.csv", "./data/toydata_large.csv", "./data/mni
 
 print("Task 1 (Linear SVM Model)\n")
 
-evaluate_SVC(data_paths[0], learning_rate=0.1, C=1.5, )
-evaluate_SVC(data_paths[1], learning_rate=0.1, C=1.5, )
-evaluate_SVC(data_paths[2], learning_rate=0.1, C=1.5, )
+# evaluate_SVC(data_paths[0], learning_rate=0.1, C=1.5, )
+# evaluate_SVC(data_paths[1], learning_rate=0.1, C=1.5, )
+# evaluate_SVC(data_paths[2], learning_rate=0.1, C=1.5, )
 
 # task 2
 
 print("\n\nTask2 (Random Fourier Features)\n")
 
-for data_path in data_paths:
+for data_path in ["./data/mnist.npz"]:  # TODO change to original
     test_rffs = [100, 200, 500, 1000]
 
     for rff in test_rffs:
-        accuracy = evaluate_SVC(data_path, epochs=200, RFF={"sigma": 1, "num_rffs": rff})
+        accuracy, _, _ = evaluate_SVC(data_path, epochs=200, RFF={"sigma": 1, "num_rffs": rff})
         print(f"accuracy using {rff} random fourier features: {accuracy}")
+
+# plot mnist subset performance and runtime
+subset_sizes = [1000, 2000, 3000]
+
+accuracies = {"custom": [], "sklearn": []}
+runtimes = {"custom": [], "sklearn": []}
+
+accuracy_filepath = "./plots/mnist_accuracy.png"
+runtime_filepath = "./plots/mnist_performance.png"
+
+for subset_size in subset_sizes:
+    accuracy_custom, runtime_custom, data = evaluate_SVC(data_paths[2], epochs=200, RFF={"sigma": 1, "num_rffs": 100},
+                                                         subset_size=subset_size)
+
+    accuracies["custom"].append(accuracy_custom)
+    runtimes["custom"].append(runtime_custom)
+
+    X, y, X_test, y_test = data[0][:subset_size], data[1][:subset_size], data[2], data[3]
+
+    start_time = time.time()
+    sklearn_svc = SVC(C=1.5, max_iter=200)
+    sklearn_svc.fit(X, y)
+    y_pred = sklearn_svc.predict(X_test)
+    accuracies["sklearn"].append(accuracy_score(y_test, y_pred))
+    runtimes["sklearn"].append(time.time() - start_time)
+
+plt.title("mnist accuracy")
+plt.ylabel("accuracy")
+plt.xlabel("sample size")
+plt.plot(subset_sizes, accuracies["custom"], label="custom")
+plt.plot(subset_sizes, accuracies["sklearn"], label="sklearn")
+plt.legend()
+plt.savefig(accuracy_filepath)
+plt.clf()
+
+plt.title("mnist runtime")
+plt.ylabel("runtime in seconds")
+plt.xlabel("sample size")
+plt.plot(subset_sizes, runtimes["custom"], label="custom")
+plt.plot(subset_sizes, runtimes["sklearn"], label="sklearn")
+plt.legend()
+plt.savefig(runtime_filepath)
+plt.clf()
 
 # task 3
 
