@@ -1,3 +1,4 @@
+import numpy
 import os
 import platform, subprocess
 
@@ -236,7 +237,8 @@ def evaluate_SVC(path, epochs=200, learning_rate=0.001, C=1.0, parallelize_sgd=F
 
     start_time = time.time()
 
-    svm = CustomSVM(path, epochs=epochs, learning_rate=learning_rate, C=C, cross_validation_is_used=not parallelize_sgd and len(data) == 2,
+    svm = CustomSVM(path, epochs=epochs, learning_rate=learning_rate, C=C,
+                    cross_validation_is_used=not parallelize_sgd and len(data) == 2,
                     parallelize_sgd=parallelize_sgd, RFF=RFF)
     print(f"used parameters: C={C}, lr={learning_rate}, epochs={epochs}")
 
@@ -300,8 +302,11 @@ class SimuParallelSGDThread(threading.Thread):
         self.append_func = append_func
 
     def run(self):
-        # initialize w0
-        w = np.zeros(self.X_partition.shape[1])
+        # initialize w0 with zeros
+        if len(np.unique(self.y_partition)) == 2:
+            w = np.zeros(self.X_partition.shape[1])
+        else:
+            w = np.zeros((self.X_partition.shape[1], len(np.unique(self.y_partition))))
 
         # use hinge loss when we have a binary classification problem and the multi class hinge loss otherwise
         loss_gradient_function = multi_class_hinge_loss if np.unique(self.y_partition).shape[0] > 2 else hinge_loss
@@ -317,9 +322,7 @@ class SimuParallelSGDThread(threading.Thread):
 
                 w = w - lr * gradient
 
-        self.lock.acquire()
         self.append_func(w, self.counter)
-        self.lock.release()
 
 
 def simu_parallel_sgd(X_, y_, learning_rate, C, epochs, k_machines):
@@ -328,12 +331,22 @@ def simu_parallel_sgd(X_, y_, learning_rate, C, epochs, k_machines):
     X_partitions = np.array_split(X_, k_machines)
     y_partitions = np.array_split(y_, k_machines)
 
-    w_array = np.zeros((k_machines, X_.shape[1]))
+    l_different_y_values = len(np.unique(y_))
+    if l_different_y_values > 2:
+        w_array = np.zeros((k_machines, X_.shape[1], l_different_y_values))
+    else:
+        w_array = np.zeros((k_machines, X_.shape[1]))
 
-    def append_func(w, i_):
-        w_array[i_] = w
+    # simu parallel sgd algorithm doesn't use epochs, we just use them for the tiny set because otherwise the performance on this dataset would be pretty bad
+    if X_.shape[0] > 30000:
+        epochs = 1
 
     lock = threading.Lock()
+
+    def append_func(w, i_):
+        lock.acquire()
+        w_array[i_] = w
+        lock.release()
 
     threads = []
 
@@ -362,15 +375,15 @@ data_paths = ("./data/toydata_tiny.csv", "./data/toydata_large.csv", "./data/mni
 
 print("Task 1 (Linear SVM Model)\n")
 
-# evaluate_SVC(data_paths[0], learning_rate=0.1, C=1.5, )
-# evaluate_SVC(data_paths[1], learning_rate=0.1, C=1.5, )
-# evaluate_SVC(data_paths[2], learning_rate=0.1, C=1.5, )
+evaluate_SVC(data_paths[0], learning_rate=0.1, C=1.5, )
+evaluate_SVC(data_paths[1], learning_rate=0.1, C=1.5, )
+evaluate_SVC(data_paths[2], learning_rate=0.1, C=1.5, )
 
 # task 2
 
 print("\n\nTask2 (Random Fourier Features)\n")
 
-for data_path in ["./data/mnist.npz"]:  # TODO change to original
+for data_path in data_paths:
     test_rffs = [100, 200, 500, 1000]
 
     for rff in test_rffs:
