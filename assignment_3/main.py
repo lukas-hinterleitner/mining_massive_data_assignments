@@ -6,7 +6,9 @@ import time
 import numpy as np
 import pandas as pd
 
-from copy import deepcopy
+import matplotlib.pyplot as plt
+
+from os.path import exists
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils import shuffle
@@ -26,7 +28,7 @@ def get_processor_info():
     return ""
 
 
-# install sklearnex: https://intel.github.io/scikit-learn-intelex/installation.html
+# install sklearn-intelex: https://intel.github.io/scikit-learn-intelex/installation.html
 
 # use hardware-acceleration for sklearn on Intel processors
 if "intel" in str(get_processor_info().lower()):
@@ -62,7 +64,7 @@ class LloydKDD:
             except KeyError:
                 clusters[cluster_idx] = [x]
 
-        return deepcopy(clusters), arg_distances
+        return clusters, arg_distances
 
     def calculate_cluster_centers(self, clusters, cluster_center_shape):
         new_cluster_centers = np.zeros(cluster_center_shape)
@@ -72,12 +74,12 @@ class LloydKDD:
 
         return new_cluster_centers
 
-    def has_converged(self, cluster_centers, new_cluster_centers):
-        centers_almost_the_same = np.allclose(cluster_centers, new_cluster_centers)
-        return centers_almost_the_same
+    def has_converged(self, clustering, old_clustering):
+        return np.array_equiv(clustering, old_clustering)
 
     def preprocess_kdd_data(self, X):
-        block_ids = X[:, 0].copy()
+        block_ids = X[:, 0]
+
         X = X[:, 1:]
         # X = StandardScaler().fit_transform(X)
 
@@ -97,28 +99,67 @@ class LloydKDD:
         # iteration counter
         i = 0
 
-        while (not self.has_converged(cluster_centers, new_cluster_centers)) and i < self.max_iter:
+        clustering = np.zeros(X.shape[0])
+        clustering_old = np.empty(X.shape[0])
+
+        nmi_scores_ = []
+
+        while (not self.has_converged(clustering, clustering_old)) and i < self.max_iter:
             cluster_centers = new_cluster_centers
+            clustering_old = clustering
             clusters, clustering = self.assign_clusters(X, cluster_centers)
             new_cluster_centers = self.calculate_cluster_centers(clusters, cluster_centers.shape)
 
-            print(normalized_mutual_info_score(block_ids, clustering))
+            nmi_scores_.append(normalized_mutual_info_score(block_ids, clustering))
 
             i += 1
 
-        runtime = time.time() - start_time
+        runtime_ = time.time() - start_time
 
-        print(f"runtime in seconds: {runtime}")
-        print(f"iterations till convergence: {i}")
+        print(f"\truntime in seconds: {runtime_}")
+        print(f"\titerations till convergence: {i}")
+        print(f"\tNMI-score: {np.mean(nmi_scores_)}")
+
+        return nmi_scores_, runtime_, i
 
 
-raw_data = pd.read_csv("data/bio_train.csv").to_numpy()
+def save_fig(x, y, x_label, y_label, title, path):
+    plt.title(title)
+    plt.xlabel(x_label)
+    plt.ylabel(y_label)
+    plt.plot(x, y)
+    plt.savefig(path)
+    plt.clf()
+
+
+raw_data = pd.read_csv("./data/bio_train.csv").to_numpy()
 
 # shuffle data
 raw_data = shuffle(raw_data, random_state=42)
 
-# since we have 153 different values we will use
+# use 153 cluster
 k = 153
 
-k_means = LloydKDD(k)
-k_means.fit(raw_data)
+# execute Task 1: Lloyd’s algorithm for k-Means Clustering (34%)
+print("Task 1: Lloyd’s algorithm for k-Means Clustering")
+
+overall_nmi_scores, overall_runtime = [], []
+
+for l in range(5):
+    print(f"Iteration {l + 1}:")
+
+    k_means = LloydKDD(k)
+    nmi_scores, runtime, iterations = k_means.fit(raw_data)
+
+    # save figure of k-means convergence once
+    if l == 0:
+        save_fig(range(len(nmi_scores)), nmi_scores, "Iterations", "NMI-Score", "NMI-Scores", "./plots/k_means.png")
+
+    # use final nmi score and append it overall scores
+    overall_nmi_scores.append(nmi_scores[-1])
+    overall_runtime.append(runtime)
+
+print()
+print(f"averaged nmi scores: {np.mean(overall_nmi_scores)}")
+print(f"averaged runtime in seconds: {np.mean(overall_runtime)}")
+print("========================================================\n")
