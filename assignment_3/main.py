@@ -38,17 +38,20 @@ if "intel" in str(get_processor_info().lower()):
 
 np.random.seed(42)
 
+distance_computation_counter = 0
 
 # lloyd's algorithm for the kdd data set
 class LloydKDD:
     # starting lloyd's heuristic with max_iter=float("inf") will run till it converges
-    def __init__(self, max_iter=float("inf")):
+    def __init__(self, k, max_iter=float("inf")):
         self.k = k
         self.max_iter = max_iter
 
     def assign_clusters(self, X, cluster_centers):
+        global distance_computation_counter
         # use sklearn pairwise_distances instead of cdist from scipy.spatial.distance because if performs faster
         distances = pairwise_distances(X, cluster_centers, "euclidean")
+        distance_computation_counter += X.shape[0] * cluster_centers.shape[0]
 
         # get the min distance to each cluster as index array
         arg_distances = distances.argmin(axis=1)
@@ -100,7 +103,7 @@ class LloydKDD:
         i = 0
 
         clustering = np.zeros(X.shape[0])
-        clustering_old = np.empty(X.shape[0])
+        clustering_old = np.ones(X.shape[0])
 
         nmi_scores_ = []
 
@@ -132,34 +135,44 @@ def save_fig(x, y, x_label, y_label, title, path):
     plt.clf()
 
 
-raw_data = pd.read_csv("./data/bio_train.csv").to_numpy()
+def task_1(raw_data, k):
+    global distance_computation_counter
+    # execute Task 1: Lloyd’s algorithm for k-Means Clustering (34%)
+    print("Task 1: Lloyd’s algorithm for k-Means Clustering")
 
-# shuffle data
-raw_data = shuffle(raw_data, random_state=42)
+    overall_nmi_scores, overall_runtime = [], []
 
-# use 153 cluster
-k = 153
+    for l in range(5):
+        print(f"Iteration {l + 1}:")
 
-# execute Task 1: Lloyd’s algorithm for k-Means Clustering (34%)
-print("Task 1: Lloyd’s algorithm for k-Means Clustering")
+        k_means = LloydKDD(k = k, max_iter=10)
+        nmi_scores, runtime, iterations = k_means.fit(raw_data)
 
-overall_nmi_scores, overall_runtime = [], []
+        # save figure of k-means convergence once
+        if l == 0:
+            save_fig(range(len(nmi_scores)), nmi_scores, "Iterations", "NMI-Score", "NMI-Scores", "./plots/k_means.png")
 
-for l in range(5):
-    print(f"Iteration {l + 1}:")
+        # use final nmi score and append it overall scores
+        overall_nmi_scores.append(nmi_scores[-1])
+        overall_runtime.append(runtime)
 
-    k_means = LloydKDD(k)
-    nmi_scores, runtime, iterations = k_means.fit(raw_data)
+    print()
+    print(f"averaged nmi scores: {np.mean(overall_nmi_scores)}")
+    print(f"averaged runtime in seconds: {np.mean(overall_runtime)}")
+    print(f"distance computations: {distance_computation_counter}")
+    print("========================================================\n")
 
-    # save figure of k-means convergence once
-    if l == 0:
-        save_fig(range(len(nmi_scores)), nmi_scores, "Iterations", "NMI-Score", "NMI-Scores", "./plots/k_means.png")
 
-    # use final nmi score and append it overall scores
-    overall_nmi_scores.append(nmi_scores[-1])
-    overall_runtime.append(runtime)
+def main():
+    raw_data = pd.read_csv("./data/bio_train.csv").to_numpy()
 
-print()
-print(f"averaged nmi scores: {np.mean(overall_nmi_scores)}")
-print(f"averaged runtime in seconds: {np.mean(overall_runtime)}")
-print("========================================================\n")
+    # shuffle data
+    raw_data = shuffle(raw_data, random_state=42)
+
+    # use 153 cluster
+    k = 153
+    
+    task_1(raw_data, k)
+
+if __name__ == "__main__":
+    main()
