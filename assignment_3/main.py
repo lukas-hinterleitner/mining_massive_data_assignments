@@ -43,31 +43,119 @@ distance_computation_counter = 0
 # lloyd's algorithm for the kdd data set
 class LloydKDD:
     # starting lloyd's heuristic with max_iter=float("inf") will run till it converges
-    def __init__(self, k, max_iter=float("inf")):
+    def __init__(self, k, max_iter=float("inf"), method=None, num_AND=1, num_OR=1, width=1):
+        
+        """
+        k...number of clusters
+        
+        max_iter...maximum number of iterations 
+        
+        method...method to be used. "LSH" is locality sensitive hashing
+        
+        num_AND, num_OR...number of AND combinations / OR combinations for LSH 
+            Example: num_AND=3, num_OR=2: (h1 and h2 and h3) or (h4 and h5 and h6)
+            uses 6 hash functions in total
+        
+        width...width of intervals used for LSH
+        
+        
+        """
         self.k = k
         self.max_iter = max_iter
+        self.method = method
+        
+        if self.method == "LSH":
+            
+            self.num_AND = num_AND
+            self.num_OR = num_OR
+            self.width = width
+            
+            self.num_hashes = self.num_AND * self.num_OR
+            
 
     def assign_clusters(self, X, cluster_centers):
         global distance_computation_counter
-        # use sklearn pairwise_distances instead of cdist from scipy.spatial.distance because if performs faster
-        distances = pairwise_distances(X, cluster_centers, "euclidean")
-        distance_computation_counter += X.shape[0] * cluster_centers.shape[0]
+        
+        
+        if self.method == "LSH":
+            
+            hash_centers = np.floor((cluster_centers@self.a + self.b)/self.width).astype(int)
+            
+            assigned_to_cluster = np.full([X.shape[0], cluster_centers.shape[0]], False)
 
-        # get the min distance to each cluster as index array
-        arg_distances = distances.argmin(axis=1)
 
-        clusters = {}
+            for i in range(cluster_centers.shape[0]):
 
-        for i, x in enumerate(X):
-            cluster_idx = arg_distances[i]
+                same_bucket = self.hash_matrix == hash_centers[i,:]
+                
+                same_AND = np.full([X.shape[0], num_OR], False)
+                
+                for j in range(num_OR):
+                    
+                    same_AND[:,j] = np.all(same_bucket[:,(num_AND*j):(num_AND*(j+1))], axis=1)
+            
+                same_OR = np.any(same_AND, axis=1)
+                
+                assigned_to_cluster[:,i] = same_OR
+            
+        
+            sum_assigned = assigned_to_cluster.sum(axis=1)
+            none_assigned = sum_assigned == 0
+            
+            
+            distances = pairwise_distances(X[none_assigned,:], cluster_centers, "euclidean")
+            distance_computation_counter += np.sum(none_assigned) * cluster_centers.shape[0]
+            
+            arg_distances = distances.argmin(axis=1)
 
-            # associate data point to corresponding cluster
-            try:
-                clusters[cluster_idx].append(x)
-            except KeyError:
-                clusters[cluster_idx] = [x]
+            labels_pred = np.empty(X.shape[0])
+            clusters = {}
+            
+            count = 0
+            for i, x in enumerate(X):
+                
+                if sum_assigned[i] > 0:
+                    
+                    potential_idx = assigned_to_cluster[i,:].nonzero()
+                    
+                    cluster_idx = np.random.choice(potential_idx[0], size=1)[0]
+                
+                else: 
+                    cluster_idx = arg_distances[count]
+                    count += 1
 
-        return clusters, arg_distances
+                # associate data point to corresponding cluster
+                try:
+                    clusters[cluster_idx].append(x)
+                except KeyError:
+                    clusters[cluster_idx] = [x]
+                
+                labels_pred[i] = cluster_idx
+    
+    
+        
+        
+        else:
+            # use sklearn pairwise_distances instead of cdist from scipy.spatial.distance because if performs faster
+            distances = pairwise_distances(X, cluster_centers, "euclidean")
+            distance_computation_counter += X.shape[0] * cluster_centers.shape[0]
+    
+            # get the min distance to each cluster as index array
+            labels_pred = distances.argmin(axis=1)
+
+            clusters = {}
+    
+            for i, x in enumerate(X):
+                cluster_idx = labels_pred[i]
+    
+                # associate data point to corresponding cluster
+                try:
+                    clusters[cluster_idx].append(x)
+                except KeyError:
+                    clusters[cluster_idx] = [x]
+    
+        
+        return clusters, labels_pred
 
     def calculate_cluster_centers(self, clusters, cluster_center_shape):
         new_cluster_centers = np.zeros(cluster_center_shape)
@@ -84,15 +172,33 @@ class LloydKDD:
         block_ids = X[:, 0]
 
         X = X[:, 1:]
-        # X = StandardScaler().fit_transform(X)
+        X = StandardScaler().fit_transform(X)
 
         return X, block_ids
+    
+    def compute_hash_matrix(self, X):
+        
+        a = np.random.normal(size = X.shape[1]*self.num_hashes)
+        a = a.reshape(X.shape[1], self.num_hashes)
+
+        b = np.random.random(self.num_hashes) * self.width
+            
+        hash_matrix = np.floor((X@a + b)/width)
+        
+        self.a = a
+        self.b = b
+        self.hash_matrix = hash_matrix.astype(int)
+        
 
     def fit(self, X):
         # block_ids contain the true clustering
         X, block_ids = self.preprocess_kdd_data(X)
 
         start_time = time.time()
+
+        # If method LSH is specified, compute hash matrix
+        if self.method == "LSH": self.compute_hash_matrix(X)
+            
 
         # initialize cluster centers
         random_indices = np.random.choice(X.shape[0], size=self.k)
@@ -176,3 +282,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
+    
