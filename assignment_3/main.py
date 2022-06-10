@@ -39,6 +39,7 @@ if "intel" in str(get_processor_info().lower()):
 np.random.seed(42)
 
 distance_computation_counter = 0
+distance_computation_counter_lsh = 0
 
 # lloyd's algorithm for the kdd data set
 class LloydKDD:
@@ -74,10 +75,11 @@ class LloydKDD:
             
 
     def assign_clusters(self, X, cluster_centers):
-        global distance_computation_counter
         
         
         if self.method == "LSH":
+            global distance_computation_counter_lsh
+
             
             hash_centers = np.floor((cluster_centers@self.a + self.b)/self.width).astype(int)
             
@@ -88,11 +90,11 @@ class LloydKDD:
 
                 same_bucket = self.hash_matrix == hash_centers[i,:]
                 
-                same_AND = np.full([X.shape[0], num_OR], False)
+                same_AND = np.full([X.shape[0], self.num_OR], False)
                 
-                for j in range(num_OR):
+                for j in range(self.num_OR):
                     
-                    same_AND[:,j] = np.all(same_bucket[:,(num_AND*j):(num_AND*(j+1))], axis=1)
+                    same_AND[:,j] = np.all(same_bucket[:,(self.num_AND*j):(self.num_AND*(j+1))], axis=1)
             
                 same_OR = np.any(same_AND, axis=1)
                 
@@ -104,7 +106,7 @@ class LloydKDD:
             
             
             distances = pairwise_distances(X[none_assigned,:], cluster_centers, "euclidean")
-            distance_computation_counter += np.sum(none_assigned) * cluster_centers.shape[0]
+            distance_computation_counter_lsh += np.sum(none_assigned) * cluster_centers.shape[0]
             
             arg_distances = distances.argmin(axis=1)
 
@@ -136,6 +138,9 @@ class LloydKDD:
         
         
         else:
+            
+            global distance_computation_counter
+            
             # use sklearn pairwise_distances instead of cdist from scipy.spatial.distance because if performs faster
             distances = pairwise_distances(X, cluster_centers, "euclidean")
             distance_computation_counter += X.shape[0] * cluster_centers.shape[0]
@@ -183,7 +188,7 @@ class LloydKDD:
 
         b = np.random.random(self.num_hashes) * self.width
             
-        hash_matrix = np.floor((X@a + b)/width)
+        hash_matrix = np.floor((X@a + b)/self.width)
         
         self.a = a
         self.b = b
@@ -269,6 +274,35 @@ def task_1(raw_data, k):
     print("========================================================\n")
 
 
+def task_2(raw_data, k):
+    global distance_computation_counter_lsh
+    # execute Task 2: LSH for k-Means Clustering (33%)
+    print("Task 2: LSH for  k-Means Clustering")
+
+    overall_nmi_scores, overall_runtime = [], []
+
+    for l in range(5):
+        print(f"Iteration {l + 1}:")
+
+        k_means = LloydKDD(k = k, max_iter=10, method="LSH", num_AND=3, num_OR=2, width=10)
+        nmi_scores, runtime, iterations = k_means.fit(raw_data)
+
+        # save figure of k-means convergence once
+        if l == 0:
+            save_fig(range(len(nmi_scores)), nmi_scores, "Iterations", "NMI-Score", "NMI-Scores", "./plots/lsh_k_means.png")
+
+        # use final nmi score and append it overall scores
+        overall_nmi_scores.append(nmi_scores[-1])
+        overall_runtime.append(runtime)
+
+    print()
+    print(f"averaged nmi scores: {np.mean(overall_nmi_scores)}")
+    print(f"averaged runtime in seconds: {np.mean(overall_runtime)}")
+    print(f"distance computations: {distance_computation_counter_lsh}")
+    print("========================================================\n")
+
+
+
 def main():
     raw_data = pd.read_csv("./data/bio_train.csv").to_numpy()
 
@@ -278,9 +312,172 @@ def main():
     # use 153 cluster
     k = 153
     
+    raw_data = raw_data[:20000,:]
+    
     task_1(raw_data, k)
+    task_2(raw_data, k)
 
 if __name__ == "__main__":
     main()
+
+
+
+#--------------------------------------------------
+
+
+raw_data = pd.read_csv("./data/bio_train.csv").to_numpy()
+
+# shuffle data
+raw_data = shuffle(raw_data, random_state=42)
+
+
+X = raw_data[:10,:]
+
+num_AND=3
+num_OR =2
+
+width=20000
+
+num_hashes = num_AND*num_OR
+
+
+
+a = np.random.normal(size=X.shape[1]*num_hashes).reshape(X.shape[1],num_hashes)
+
+b = np.random.random(num_hashes) * width
+
+temp = X@a
+
+temp2 = (X@a+b)/width
+temp2.astype(int)
+
+res = np.floor((X@a+b)/width)
+
+hash_matrix = res.astype(int)
+
+
+
+
+
+cluster_centers = raw_data[100:105,:]
+cluster_centers.shape
+
+assigned_to_cluster = np.full([X.shape[0], cluster_centers.shape[0]], False)
+
+for i in range(cluster_centers.shape[0]):
     
+    center = cluster_centers[i,:]
     
+    hash_center = np.floor((center@a+b)/width).astype(int)
+    
+    same_bucket = hash_matrix == hash_center
+    
+    #print(same_bucket)
+    same_AND = np.full([X.shape[0], num_OR], False)
+    
+    for j in range(num_OR):
+        
+         
+        same_AND[:,j] = np.all(same_bucket[:,(num_AND*j):(num_AND*(j+1))], axis=1)
+
+    same_OR = np.any(same_AND, axis=1)
+    assigned_to_cluster[:,i] = same_OR
+    
+print(assigned_to_cluster)
+
+np.where(assigned_to_cluster,axis=1)
+assigned_to_cluster[6,:].nonzero()
+
+any_assigned = np.any(assigned_to_cluster, axis=1)
+sum_assigned = assigned_to_cluster.sum(axis=1)
+
+for k in range(len(sum_assigned)):
+    #print(k)
+    if sum_assigned[k] > 0:
+        
+        temp = assigned_to_cluster[k,:].nonzero()
+        print(temp[0])
+        print(assigned_to_cluster[k,:])
+        print(np.random.choice(temp[0]))
+        
+np.random.choice([4],size=1)[0]
+
+X[np.invert(any_assigned),:].shape
+
+np.sum(assigned_to_cluster,axis=1)
+
+assigned_to_cluster.sum(axis=1)
+
+assigned_to_cluster.argmin(axis=1)
+
+
+np.full([num_hashes, num_OR], True)
+
+np.array(False)
+
+np.floor(1.5)
+a.shape
+X.shape
+
+dic1 = {}
+dic2 = {}
+
+
+dic1[1] = [11]
+dic1[1] = [12]
+
+dic2[1]=[13,14]
+
+dic3 = dic1.update(dic2)
+dic1
+dic2
+dic3
+print(dic1)
+
+
+
+def task_2(raw_data, k):
+    global distance_computation_counter
+    # execute Task 2: LSH for k-Means Clustering (33%)
+    print("Task 2: LSH for  k-Means Clustering")
+
+    overall_nmi_scores, overall_runtime = [], []
+
+    for l in range(5):
+        print(f"Iteration {l + 1}:")
+
+        k_means = LloydKDD(k = k, max_iter=10, method="LSH", num_AND=3, num_OR=2, width=10)
+        nmi_scores, runtime, iterations = k_means.fit(raw_data)
+
+        # save figure of k-means convergence once
+        if l == 0:
+            save_fig(range(len(nmi_scores)), nmi_scores, "Iterations", "NMI-Score", "NMI-Scores", "./plots/lsh_k_means.png")
+
+        # use final nmi score and append it overall scores
+        overall_nmi_scores.append(nmi_scores[-1])
+        overall_runtime.append(runtime)
+
+    print()
+    print(f"averaged nmi scores: {np.mean(overall_nmi_scores)}")
+    print(f"averaged runtime in seconds: {np.mean(overall_runtime)}")
+    print(f"distance computations: {distance_computation_counter}")
+    print("========================================================\n")
+
+raw_data = pd.read_csv("./data/bio_train.csv").to_numpy()
+
+    # shuffle data
+raw_data = shuffle(raw_data, random_state=42)
+
+    # use 153 cluster
+k = 153
+
+distance_computation_counter = 0
+task_2(raw_data, k)
+distance_computation_counter = 0
+task_1(raw_data,k)
+
+
+
+
+
+
