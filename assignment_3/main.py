@@ -11,9 +11,9 @@ import matplotlib.pyplot as plt
 from os.path import exists
 
 from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
 from sklearn.utils import shuffle
-from sklearn.metrics import normalized_mutual_info_score
-from sklearn.metrics import pairwise_distances
+from sklearn.metrics import normalized_mutual_info_score, pairwise_distances, accuracy_score
 
 
 # https://stackoverflow.com/a/20161999
@@ -40,6 +40,37 @@ np.random.seed(42)
 
 distance_computation_counter = 0
 distance_computation_counter_lsh = 0
+
+
+def q(mu, X):
+    n = len(X)
+    q = 1/(2*n) + 1/2*(np.linalg.norm(X - mu, axis = 1)**2) / \
+        (np.sum(np.linalg.norm(X - mu, axis=1)**2))
+    return(q)
+
+
+def construct_coreset(X, m):
+    mu = np.mean(X, axis=0)
+    q_x = q(mu, X)
+    coreset_index = np.random.choice(
+        np.arange(X.shape[0]), m, replace=False, p=q_x)
+    coreset = X[coreset_index]
+    core_qs = q_x[coreset_index]
+    weights = 1/m/core_qs
+    return(coreset, weights)
+
+
+def get_optimal_m(epsilon, delta, k, d):
+    m = int(np.ceil(0.0001*(d*k*np.log(k) - np.log(delta))/(epsilon**2)))
+    return(m)
+
+def preprocess_kdd_data(X):
+    block_ids = X[:, 0]
+
+    X = X[:, 1:]
+    X = StandardScaler().fit_transform(X)
+
+    return X, block_ids
 
 # lloyd's algorithm for the kdd data set
 class LloydKDD:
@@ -302,6 +333,47 @@ def task_2(raw_data, k):
     print("========================================================\n")
 
 
+def task_3(raw_data, k):
+    # execute Task 3: Coresets for k-Means Clustering (33%)
+    print("Task 3: Coresets for k-Means Clustering")
+    
+    X, block_ids = preprocess_kdd_data(raw_data)        
+
+    epsilon_delta_list = [(0.1,0.1), (0.05, 0.1), (0.1, 0.01), (0.05, 0.01)]
+    for epsilon_delta in epsilon_delta_list:
+        epsilon = epsilon_delta[0]
+        delta = epsilon_delta[1]
+        print("epsilon: {}, delta: {}".format(epsilon, delta))
+        nmi_scores, runtimes, iterations, accuracies = [], [], [], []
+        for l in range(10):
+            m = get_optimal_m(epsilon, delta, k, X.shape[1])
+            if l == 0: print("m: {}".format(m))
+            coreset, coreset_weights = construct_coreset(X, m)
+
+            start_time = time.time()
+            
+            k_means = KMeans(n_clusters=k, max_iter=100)
+            k_means.fit(coreset, sample_weight=coreset_weights)
+            labels = k_means.predict(X)
+            iterations.append(k_means.n_iter_)
+            
+            end_time = time.time()
+
+            nmi_score = normalized_mutual_info_score(block_ids, labels)
+            accuracies.append(accuracy_score(block_ids, labels))
+            
+            runtime = end_time - start_time
+            
+            # use final nmi score and append it overall scores
+            nmi_scores.append(nmi_score)
+            runtimes.append(runtime)
+
+        print(f"averaged nmi scores: {np.mean(nmi_scores)}")
+        print(f"variance of accuracies: {np.var(accuracies)}")
+        print(f"averaged runtime in seconds: {np.mean(runtimes)}")
+        print(f"averaged iterations: {np.mean(iterations)}")
+        print("========================================================\n")
+
 
 def main():
     raw_data = pd.read_csv("./data/bio_train.csv").to_numpy()
@@ -316,6 +388,7 @@ def main():
     
     task_1(raw_data, k)
     task_2(raw_data, k)
+    task_3(raw_data, k)
 
 if __name__ == "__main__":
     main()
